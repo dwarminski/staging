@@ -2,13 +2,14 @@
 LIVE_DIR=live
 MODULES_DIR=modules
 BACKEND_CONFIG=backend.hcl
-
-# Environments
 ENVIRONMENTS=dev staging prod
 
-# Create directory structure
+# Error: Resource already exists, import into tfstate
+# Reason: Tg copies files into .tg-cache
+FIND_TG = find $(LIVE_DIR) -path "*/.terragrunt-cache/*" -prune -o -type f -name "terragrunt.hcl" -print
+
 .PHONY: init-structure
-init-structure:
+define create_dirs
 	@echo "Creating directory structure..."
 	@mkdir -p $(LIVE_DIR) $(MODULES_DIR)
 	@for env in $(ENVIRONMENTS); do \
@@ -16,70 +17,84 @@ init-structure:
 		touch $(LIVE_DIR)/$$env/terragrunt.hcl; \
 		touch $(LIVE_DIR)/$$env/vpc/terragrunt.hcl; \
 		touch $(LIVE_DIR)/$$env/vm/terragrunt.hcl; \
-	done
-	@mkdir -p $(MODULES_DIR)/vpc $(MODULES_DIR)/vm
-	@touch $(MODULES_DIR)/vpc/main.tf $(MODULES_DIR)/vm/main.tf
-	@touch $(BACKEND_CONFIG)
-	@echo "✅ Directory structure created!"
+	done; \
+	mkdir -p $(MODULES_DIR)/vpc $(MODULES_DIR)/vm; \
+	touch $(MODULES_DIR)/vpc/main.tf $(MODULES_DIR)/vm/main.tf; \
+	touch $(BACKEND_CONFIG); \
+	echo "✅ Directory structure created!"
+endef
 
-# Terraform & Terragrunt
-.PHONY: terraform-init terragrunt-init
-terraform-init:
-	@echo "Initializing Terraform..."
-	cd $(LIVE_DIR)/dev && terraform init -backend-config=../../$(BACKEND_CONFIG)
-	@echo "✅ Terraform Initialized!"
+init-structure:
+	$(create_dirs)
 
+.PHONY: terragrunt-init
 terragrunt-init:
 	@echo "Initializing Terragrunt..."
-	cd $(LIVE_DIR)/dev && terragrunt init
-	@echo "✅ Terragrunt Initialized!"
+	@$(FIND_TG) | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Initializing in $$dir..."; \
+		(cd $$dir && terragrunt init -reconfigure) || exit 1; \
+	done
+	@echo "✅ Terragrunt Initialized in all directories!"
 
-.PHONY: terraform-validate terragrunt-validate
-terraform-validate:
-	@echo "Validating Terraform..."
-	cd $(LIVE_DIR)/dev && terraform validate
-	@echo "✅ Terraform code is valid!"
-
+.PHONY: terragrunt-validate
 terragrunt-validate:
 	@echo "Validating Terragrunt..."
-	cd $(LIVE_DIR)/dev && terragrunt validate
-	@echo "✅ Terragrunt code is valid!"
+	@$(FIND_TG) | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Validating in $$dir..."; \
+		(cd $$dir && terragrunt validate) || exit 1; \
+	done
+	@echo "✅ Terragrunt code is valid in all directories!"
 
-.PHONY: terraform-plan terragrunt-plan
-terraform-plan:
-	@echo "Generating Terraform plan..."
-	cd $(LIVE_DIR)/dev && terraform plan -out=tfplan
-	@echo "✅ Terraform plan is ready!"
-
+.PHONY: terragrunt-plan
 terragrunt-plan:
 	@echo "Generating Terragrunt plan..."
-	cd $(LIVE_DIR)/dev && terragrunt plan
-	@echo "✅ Terragrunt plan is ready!"
+	@$(FIND_TG) | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Planning in $$dir..."; \
+		(cd $$dir && terragrunt plan) || exit 1; \
+	done
+	@echo "✅ Terragrunt plan is ready in all directories!"
 
-.PHONY: terraform-apply terragrunt-apply
-terraform-apply:
-	@echo "🚀 Applying Terraform changes..."
-	cd $(LIVE_DIR)/dev && terraform apply -auto-approve tfplan
-	@echo "✅ Terraform changes applied!"
-
+.PHONY: terragrunt-apply
 terragrunt-apply:
 	@echo "🚀 Applying Terragrunt changes..."
-	cd $(LIVE_DIR)/dev && terragrunt apply -auto-approve
-	@echo "✅ Terragrunt changes applied!"
+	@$(FIND_TG) | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Applying in $$dir..."; \
+		(cd $$dir && terragrunt apply -auto-approve) || exit 1; \
+	done
+	@echo "✅ Terragrunt changes applied in all directories!"
 
-.PHONY: terraform-destroy terragrunt-destroy
-terraform-destroy:
-	@echo "🛑 Destroying Terraform resources..."
-	cd $(LIVE_DIR)/dev && terraform destroy -auto-approve
-	@echo "✅ Terraform resources destroyed!"
+.PHONY: terragrunt-destroy-vm
+terragrunt-destroy-vm:
+	@echo "🛑 Destroying VM modules..."
+	@find $(LIVE_DIR) -path "*/vm/terragrunt.hcl" -print | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Destroying VM in $$dir..."; \
+		(cd $$dir && yes | terragrunt destroy -auto-approve) || exit 1; \
+	done
+	@echo "✅ VM modules destroyed!"
 
-terragrunt-destroy:
-	@echo "🛑 Destroying Terragrunt resources..."
-	cd $(LIVE_DIR)/dev && terragrunt destroy -auto-approve
-	@echo "✅ Terragrunt resources destroyed!"
+.PHONY: terragrunt-destroy-vpc
+terragrunt-destroy-vpc:
+	@echo "🛑 Destroying VPC modules..."
+	@find $(LIVE_DIR) -path "*/vpc/terragrunt.hcl" -print | while read file; do \
+		dir=$$(dirname $$file); \
+		echo "Destroying VPC in $$dir..."; \
+		(cd $$dir && yes | terragrunt destroy -auto-approve) || exit 1; \
+	done
+	@echo "✅ VPC modules destroyed!"
+
+.PHONY: terragrunt-destroy
+terragrunt-destroy: terragrunt-destroy-vm terragrunt-destroy-vpc
+	@echo "✅ All Terragrunt resources destroyed in proper order!"
+# Inject yes into destroy to avoid "Detected dependent modules"
+# Tg looses order of deleting
 
 .PHONY: del-structure
 del-structure:
 	@echo "Deleting directory structure..."
-	rm -rf $(LIVE_DIR) $(MODULES_DIR) $(BACKEND_CONFIG)
+	@rm -rf $(LIVE_DIR) $(MODULES_DIR) $(BACKEND_CONFIG)
 	@echo "✅ Directory structure deleted!"

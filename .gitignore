@@ -3,6 +3,8 @@
 *.tfstate.*
 .terraform/
 .terraform.lock.hcl
+backend.hcl
+.terragrunt-cache/
 
 # Ignore backup and temporary files
 *.backup

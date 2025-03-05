@@ -1,9 +1,9 @@
 # staging
 
-terraform-project/
+staging/
 ├── live/ # Envs config (dev, staging, prod)
 │ ├── dev/ # Dev env
-│ │ ├── terragrunt.hcl # Main config Terragrunt
+│ │ ├── env.hcl # Main config Terragrunt
 │ │ ├── vpc/ # VPC config
 │ │ │ ├── terragrunt.hcl
 │ │ ├── vm/ # VM config
